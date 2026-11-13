@@ -2,6 +2,8 @@ import time, requests, math, traceback, json
 
 TELEGRAM_TOKEN = '9267375532:AAH1J6hZGJhlJN6cZiHn8ur-rRUHi7HE-LA'
 TELEGRAM_CHAT_ID = '8633386457'
+import uuid
+INSTANCE_ID = str(uuid.uuid4())[:6]
 # ===== BINANCE PERPETUAL (FUTURES) DATA =====
 # .P කියන්නෙ Perp. Futures API එකෙන්ම ගන්නවා
 BASE = "https://fapi.binance.vision"
