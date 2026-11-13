@@ -2,12 +2,9 @@ import time, requests, math, traceback, json
 
 TELEGRAM_TOKEN = '9267375532:AAFe8pS5bvsRrDAA8_4soTzetvD1uN6HJ0g'
 TELEGRAM_CHAT_ID = '8633386457'
-import uuid
-INSTANCE_ID = str(uuid.uuid4())[:6]
 # ===== BINANCE PERPETUAL (FUTURES) DATA =====
-# .P කියන්නෙ Perp. Futures API එකෙන්ම ගන්නවා
 BASE = "https://fapi.binance.vision"
-# ===== ඔයාගෙ COIN 3 විතරයි =====
+# ===== COIN 3 විතරයි =====
 SYMBOLS = ["ONTUSDT", "DOTUSDT", "PUMPUSDT"]
 
 def send_telegram(msg):
@@ -26,7 +23,6 @@ def safe_json(r):
 
 def get_klines(symbol, limit=100):
     try:
-        # Futures Klines
         r = requests.get(f"{BASE}/fapi/v1/klines?symbol={symbol}&interval=5m&limit={limit}", timeout=15)
         data = safe_json(r)
         if data is None or isinstance(data, dict): return None
@@ -35,7 +31,6 @@ def get_klines(symbol, limit=100):
 
 def get_agg_trades(symbol, limit=1000):
     try:
-        # Futures AggTrades
         r = requests.get(f"{BASE}/fapi/v1/aggTrades?symbol={symbol}&limit={limit}", timeout=15)
         data = safe_json(r)
         if data is None or isinstance(data, dict): return None
@@ -101,14 +96,13 @@ def get_orderflow(trades):
     bear_abs = (r_delta > 0.5) and (abs(price_change_pct) < 0.08) and (price_end <= price_start)
     return delta_pct, cvd_rising, bull_abs, bear_abs
 
-# ===== V17 - Coin 3ටම ගැලපෙන Risk =====
 def get_risk_limits(price):
     if price > 1000: return 30, 8
     elif price > 100: return 3, 0.8
     elif price > 10: return 0.3, 0.08
-    elif price > 1: return 0.03, 0.008  # DOT ~ 3$
-    elif price > 0.1: return price*0.03, price*0.008 # ONT ~ 0.15$
-    else: return price*0.03, price*0.008 # PUMP ~ 0.002$
+    elif price > 1: return 0.03, 0.008
+    elif price > 0.1: return price*0.03, price*0.008
+    else: return price*0.03, price*0.008
 
 def calc_trade(price, direction, klines, nearest_lvn):
     max_risk, min_risk = get_risk_limits(price)
@@ -167,7 +161,6 @@ while True:
                 if ema9 < ema21: sell_score+=1
                 if not cvd_rising and delta_pct < 0: sell_score+=1
                 if bear_pa or bear_abs: sell_score+=1
-                # Decimal - PUMP එකට 6ක්, ONT එකට 4ක්, DOT එකට 3ක්
                 if price > 100: dec = 1
                 elif price > 10: dec = 2
                 elif price > 1: dec = 3
