@@ -2,8 +2,11 @@ import time, requests, math, traceback, json
 
 TELEGRAM_TOKEN = '9267375532:AAH1J6hZGJhlJN6cZiHn8ur-rRUHi7HE-LA'
 TELEGRAM_CHAT_ID = '8633386457'
-BASE = "https://data-api.binance.vision"
-SYMBOL = "BTCUSDT"
+# ===== BINANCE PERPETUAL (FUTURES) DATA =====
+# .P කියන්නෙ Perp. Futures API එකෙන්ම ගන්නවා
+BASE = "https://fapi.binance.vision"
+# ===== ඔයාගෙ COIN 3 විතරයි =====
+SYMBOLS = ["ONTUSDT", "DOTUSDT", "PUMPUSDT"]
 
 def send_telegram(msg):
     try:
@@ -19,17 +22,19 @@ def safe_json(r):
     try: return json.loads(txt)
     except: return None
 
-def get_klines(limit=100):
+def get_klines(symbol, limit=100):
     try:
-        r = requests.get(f"{BASE}/api/v3/klines?symbol={SYMBOL}&interval=5m&limit={limit}", timeout=15)
+        # Futures Klines
+        r = requests.get(f"{BASE}/fapi/v1/klines?symbol={symbol}&interval=5m&limit={limit}", timeout=15)
         data = safe_json(r)
         if data is None or isinstance(data, dict): return None
         return data
     except: return None
 
-def get_agg_trades(limit=1000):
+def get_agg_trades(symbol, limit=1000):
     try:
-        r = requests.get(f"{BASE}/api/v3/aggTrades?symbol={SYMBOL}&limit={limit}", timeout=15)
+        # Futures AggTrades
+        r = requests.get(f"{BASE}/fapi/v1/aggTrades?symbol={symbol}&limit={limit}", timeout=15)
         data = safe_json(r)
         if data is None or isinstance(data, dict): return None
         return data
@@ -84,7 +89,7 @@ def get_orderflow(trades):
     half = len(trades)//2
     cvd_first = sum([float(t['q']) if not t['m'] else -float(t['q']) for t in trades[:half]])
     cvd_last = sum([float(t['q']) if not t['m'] else -float(t['q']) for t in trades[half:]])
-    cvd_rising = cvd_last > cvd_first; cvd_slope = cvd_last - cvd_first
+    cvd_rising = cvd_last > cvd_first
     recent = trades[-300:]
     r_buy = sum([float(t['q']) for t in recent if not t['m']]); r_sell = sum([float(t['q']) for t in recent if t['m']])
     r_delta = r_buy - r_sell
@@ -92,146 +97,152 @@ def get_orderflow(trades):
     price_change_pct = (price_end - price_start)/price_start*100
     bull_abs = (r_delta < -0.5) and (abs(price_change_pct) < 0.08) and (price_end >= price_start)
     bear_abs = (r_delta > 0.5) and (abs(price_change_pct) < 0.08) and (price_end <= price_start)
-    return delta_pct, cvd_rising, cvd_slope, bull_abs, bear_abs
+    return delta_pct, cvd_rising, bull_abs, bear_abs
 
-# ===== V14 - SL / TP හරියට හදන Function එක =====
+# ===== V17 - Coin 3ටම ගැලපෙන Risk =====
+def get_risk_limits(price):
+    if price > 1000: return 30, 8
+    elif price > 100: return 3, 0.8
+    elif price > 10: return 0.3, 0.08
+    elif price > 1: return 0.03, 0.008  # DOT ~ 3$
+    elif price > 0.1: return price*0.03, price*0.008 # ONT ~ 0.15$
+    else: return price*0.03, price*0.008 # PUMP ~ 0.002$
+
 def calc_trade(price, direction, klines, nearest_lvn):
-    # අන්තිම Candle 3ක Low / High එක ගන්නවා
+    max_risk, min_risk = get_risk_limits(price)
     last3_lows = [float(k[3]) for k in klines[-3:]]
     last3_highs = [float(k[2]) for k in klines[-3:]]
-    swing_low = min(last3_lows)
-    swing_high = max(last3_highs)
+    swing_low = min(last3_lows); swing_high = max(last3_highs)
     if direction == "BUY":
-        # SL = Swing Low - 30, නැත්නම් LVN - 30, දෙකෙන් ලගම එක. Risk එක 300ට වඩා වැඩි වෙන්න බෑ.
-        sl_candidate1 = swing_low - 30
-        sl_candidate2 = nearest_lvn - 30
-        # Entry එකට ලගම SL එක ගන්නවා, ඒත් Risk එක 300ට වඩා වැඩි නම් Entry - 300 කරනවා
-        sl = max(sl_candidate1, sl_candidate2)
-        if price - sl > 300: sl = price - 300
-        if price - sl < 80: sl = price - 80
+        sl = max(swing_low - max_risk*0.1, nearest_lvn - max_risk*0.1)
+        if price - sl > max_risk: sl = price - max_risk
+        if price - sl < min_risk: sl = price - min_risk
         risk = price - sl
         tp1 = price + risk*2
         tp2 = price + risk*3
         return sl, tp1, tp2, risk, swing_low
     else:
-        sl_candidate1 = swing_high + 30
-        sl_candidate2 = nearest_lvn + 30
-        sl = min(sl_candidate1, sl_candidate2)
-        if sl - price > 300: sl = price + 300
-        if sl - price < 80: sl = price + 80
+        sl = min(swing_high + max_risk*0.1, nearest_lvn + max_risk*0.1)
+        if sl - price > max_risk: sl = price + max_risk
+        if sl - price < min_risk: sl = price + min_risk
         risk = sl - price
         tp1 = price - risk*2
         tp2 = price - risk*3
         return sl, tp1, tp2, risk, swing_high
 
-print("BOT STARTED - V14 FIXED SL TP", flush=True)
-send_telegram("🔥 BOT ON - V14\nSL / TP Fix kala. Risk eka 300ta wada wadi na.\nDan TP eka lagata enawa.\n\n1. FRVP LVN\n2. Break + Retest\n3. Price Action\n4. Delta Absorption\n5. CVD\n6. VWAP Bands")
+print("BOT STARTED - V17 PERP 3 COINS", flush=True)
+send_telegram("🔥 BOT ON - V17 PERP\nBinance Perpetual Only\nCoin 3i witharai:\n1. ONTUSDT.P\n2. DOTUSDT.P\n3. PUMPUSDT.P\n\nDan Perp Data walin analyse karanawa.")
 
-last_candle = 0
-pending_break = None
+state = {s: {"pending": None, "last_candle": 0} for s in SYMBOLS}
 
 while True:
     try:
-        klines = get_klines(100)
-        if klines is None:
-            time.sleep(20); continue
-        closes = [float(k[4]) for k in klines]
-        price = closes[-1]; candle_time = klines[-1][0]
-        if candle_time == last_candle:
-            time.sleep(20); continue
-        last_candle = candle_time
-        poc, lvn_list = get_volume_profile(klines)
-        vwap, v1u, v1d, v2u, v2d, v3u, v3d = get_vwap_bands(klines)
-        bull_pa, bear_pa, pa_name = get_price_action(klines)
-        trades = get_agg_trades(1000)
-        if trades is None:
-            time.sleep(20); continue
-        delta_pct, cvd_rising, cvd_slope, bull_abs, bear_abs = get_orderflow(trades)
-        ema9 = ema(closes,9); ema21 = ema(closes,21)
-
-        nearest_lvn = min(lvn_list, key=lambda x: abs(x-price))
-        buy_score = 0
-        if price > nearest_lvn: buy_score+=1
-        if price > vwap: buy_score+=1
-        if ema9 > ema21: buy_score+=1
-        if cvd_rising and delta_pct > 0: buy_score+=1
-        if bull_pa or bull_abs: buy_score+=1
-        sell_score = 0
-        if price < nearest_lvn: sell_score+=1
-        if price < vwap: sell_score+=1
-        if ema9 < ema21: sell_score+=1
-        if not cvd_rising and delta_pct < 0: sell_score+=1
-        if bear_pa or bear_abs: sell_score+=1
-
-        if buy_score >= 3 and buy_score > sell_score:
-            direction = "🟢 BUY"; side_text = "BUY / LONG"; action = "BUY ගන්න"
-            sl, tp1, tp2, risk, swing = calc_trade(price, "BUY", klines, nearest_lvn)
-            entry = price
-        elif sell_score >= 3 and sell_score > buy_score:
-            direction = "🔴 SELL"; side_text = "SELL / SHORT"; action = "SELL ගන්න"
-            sl, tp1, tp2, risk, swing = calc_trade(price, "SELL", klines, nearest_lvn)
-            entry = price
-        else:
-            direction = "⏳ WAIT - NO TRADE"; side_text = "WAIT"; action = "Trade ගන්න එපා, Break එකක් එනකන් ඉන්න"
-            entry = price; sl = nearest_lvn; tp1 = entry; tp2 = entry; risk = 0; swing = 0
-
-        plan_text = f"{direction}\nSide: {side_text}\nEntry: {entry:.1f}\n🛑 Stop Loss: {sl:.1f}\n🎯 Take Profit 1: {tp1:.1f}\n🎯 Take Profit 2: {tp2:.1f}\nRisk: {risk:.0f} | RR: 1:2\nBuy Score: {buy_score}/5 | Sell Score: {sell_score}/5\nBase LVN: {nearest_lvn:.0f} | Swing: {swing:.1f}"
-
-        print(f"Price:{price:.0f} Dir:{direction} Buy:{buy_score} Sell:{sell_score} SL:{sl:.0f} TP1:{tp1:.0f}", flush=True)
-
-        if pending_break is None:
-            found = False
-            for lvl in lvn_list:
-                if closes[-2] < lvl < price:
-                    pending_break = {"level": lvl, "dir": "UP", "candles": 0}; found=True
-                    sl_b, tp_b, tp2_b, _, _ = calc_trade(price, "BUY", klines, lvl)
-                    send_telegram(f"👀 BREAK UP - LVN {lvl:.0f}\nPrice: {price:.0f}\n\n🟢 BUY SETUP (Retest enakan inna)\nSide: BUY / LONG\nEntry: {price:.1f}\n🛑 Stop Loss: {sl_b:.1f}\n🎯 Take Profit 1: {tp_b:.1f}\n🎯 Take Profit 2: {tp2_b:.1f}\n\nVWAP: {vwap:.0f}")
-                elif closes[-2] > lvl > price:
-                    pending_break = {"level": lvl, "dir": "DOWN", "candles": 0}; found=True
-                    sl_b, tp_b, tp2_b, _, _ = calc_trade(price, "SELL", klines, lvl)
-                    send_telegram(f"🔴 BREAK DOWN - LVN {lvl:.0f}\nPrice: {price:.0f}\n\n🔴 SELL SETUP (Retest enakan inna)\nSide: SELL / SHORT\nEntry: {price:.1f}\n🛑 Stop Loss: {sl_b:.1f}\n🎯 Take Profit 1: {tp_b:.1f}\n🎯 Take Profit 2: {tp2_b:.1f}\n\nVWAP: {vwap:.0f}")
-            if not found:
-                send_telegram(f"📊 SCAN 5M - V14\nPrice: {price:.0f}\nPOC: {poc:.0f} | Nearest LVN: {nearest_lvn:.0f}\nVWAP: {vwap:.0f} | V2U: {v2u:.0f} V2D: {v2d:.0f}\nPA: {pa_name} | Delta: {delta_pct:.1f}% | CVD: {'UP 🟢' if cvd_rising else 'DOWN 🔴'}\nAbsorption: Bull {bull_abs} Bear {bear_abs}\n\n--- TRADE DECISION ---\n{plan_text}\n\n{action}")
-            time.sleep(10); continue
-
-        pending_break["candles"] += 1
-        if pending_break["candles"] > 10:
-            send_telegram(f"❌ Break Cancel - Retest awe na\nLevel: {pending_break['level']:.0f}")
-            pending_break = None; continue
-        lvl = pending_break["level"]
-        is_retest = abs(price - lvl) / lvl < 0.003
-        if not is_retest:
-            send_telegram(f"⏳ Waiting Retest...\nLevel: {lvl:.0f} | Price: {price:.0f} | Gap: {abs(price-lvl):.0f}\nPA: {pa_name} | CVD: {'UP' if cvd_rising else 'DOWN'}\n\n{plan_text}")
-            time.sleep(10); continue
-        if pending_break["dir"]=="UP":
-            score=0; reasons=[]
-            if price > lvl: score+=1; reasons.append("✅ Retest Hold")
-            if bull_pa: score+=1; reasons.append(f"✅ PA: {pa_name}")
-            if bull_abs: score+=1; reasons.append("✅ Bull Absorption 🔥")
-            if cvd_rising and delta_pct > 0.5: score+=1; reasons.append(f"✅ CVD UP Delta +{delta_pct:.1f}%")
-            if price > vwap or abs(price-v2d)<200: score+=1; reasons.append("✅ VWAP OK")
-            if ema9 > ema21: score+=1; reasons.append("✅ EMA UP")
-            if score >= 4:
-                sl_c, tp_c, tp2_c, _, _ = calc_trade(price, "BUY", klines, lvl)
-                send_telegram(f"🟢 BUY SIGNAL - CONFIRMED - SCORE {score}/6\n\nPair: BTCUSDT 5M\nSide: BUY / LONG\nEntry: {price:.1f}\n🛑 Stop Loss: {sl_c:.1f}\n🎯 Take Profit 1: {tp_c:.1f}\n🎯 Take Profit 2: {tp2_c:.1f}\nRR: 1:2\n\n" + "\n".join(reasons) + f"\nPOC: {poc:.0f} | VWAP: {vwap:.0f}\n\n👉 Dan BUY Trade eka ganna!")
-                pending_break=None
-            else:
-                send_telegram(f"⚠️ Retest awa, eth Score madi: {score}/6\nLevel: {lvl:.0f} Price: {price:.0f}\n" + "\n".join(reasons) + f"\n\n{plan_text}")
-        elif pending_break["dir"]=="DOWN":
-            score=0; reasons=[]
-            if price < lvl: score+=1; reasons.append("✅ Retest Reject")
-            if bear_pa: score+=1; reasons.append(f"✅ PA: {pa_name}")
-            if bear_abs: score+=1; reasons.append("✅ Bear Absorption 🔥")
-            if not cvd_rising and delta_pct < -0.5: score+=1; reasons.append(f"✅ CVD DOWN Delta {delta_pct:.1f}%")
-            if price < vwap or abs(price-v2u)<200: score+=1; reasons.append("✅ VWAP OK")
-            if ema9 < ema21: score+=1; reasons.append("✅ EMA DOWN")
-            if score >= 4:
-                sl_c, tp_c, tp2_c, _, _ = calc_trade(price, "SELL", klines, lvl)
-                send_telegram(f"🔴 SELL SIGNAL - CONFIRMED - SCORE {score}/6\n\nPair: BTCUSDT 5M\nSide: SELL / SHORT\nEntry: {price:.1f}\n🛑 Stop Loss: {sl_c:.1f}\n🎯 Take Profit 1: {tp_c:.1f}\n🎯 Take Profit 2: {tp2_c:.1f}\nRR: 1:2\n\n" + "\n".join(reasons) + f"\nPOC: {poc:.0f} | VWAP: {vwap:.0f}\n\n👉 Dan SELL Trade eka ganna!")
-                pending_break=None
-            else:
-                send_telegram(f"⚠️ Retest awa, eth Score madi: {score}/6\nLevel: {lvl:.0f} Price: {price:.0f}\n" + "\n".join(reasons) + f"\n\n{plan_text}")
-        time.sleep(10)
+        for symbol in SYMBOLS:
+            try:
+                klines = get_klines(symbol, 100)
+                if klines is None: continue
+                closes = [float(k[4]) for k in klines]
+                price = closes[-1]; candle_time = klines[-1][0]
+                if candle_time == state[symbol]["last_candle"]: continue
+                state[symbol]["last_candle"] = candle_time
+                poc, lvn_list = get_volume_profile(klines)
+                vwap, v1u, v1d, v2u, v2d, v3u, v3d = get_vwap_bands(klines)
+                bull_pa, bear_pa, pa_name = get_price_action(klines)
+                trades = get_agg_trades(symbol, 1000)
+                if trades is None: continue
+                delta_pct, cvd_rising, bull_abs, bear_abs = get_orderflow(trades)
+                ema9 = ema(closes,9); ema21 = ema(closes,21)
+                nearest_lvn = min(lvn_list, key=lambda x: abs(x-price))
+                buy_score = 0
+                if price > nearest_lvn: buy_score+=1
+                if price > vwap: buy_score+=1
+                if ema9 > ema21: buy_score+=1
+                if cvd_rising and delta_pct > 0: buy_score+=1
+                if bull_pa or bull_abs: buy_score+=1
+                sell_score = 0
+                if price < nearest_lvn: sell_score+=1
+                if price < vwap: sell_score+=1
+                if ema9 < ema21: sell_score+=1
+                if not cvd_rising and delta_pct < 0: sell_score+=1
+                if bear_pa or bear_abs: sell_score+=1
+                # Decimal - PUMP එකට 6ක්, ONT එකට 4ක්, DOT එකට 3ක්
+                if price > 100: dec = 1
+                elif price > 10: dec = 2
+                elif price > 1: dec = 3
+                elif price > 0.1: dec = 4
+                elif price > 0.01: dec = 5
+                else: dec = 6
+                if buy_score >= 3 and buy_score > sell_score:
+                    direction = "🟢 BUY"; side_text = "BUY / LONG"; action = "BUY ගන්න"
+                    sl, tp1, tp2, risk, swing = calc_trade(price, "BUY", klines, nearest_lvn)
+                    entry = price
+                elif sell_score >= 3 and sell_score > buy_score:
+                    direction = "🔴 SELL"; side_text = "SELL / SHORT"; action = "SELL ගන්න"
+                    sl, tp1, tp2, risk, swing = calc_trade(price, "SELL", klines, nearest_lvn)
+                    entry = price
+                else:
+                    direction = "⏳ WAIT"; side_text = "WAIT"; action = "Trade ගන්න එපා, Break එකක් එනකන් ඉන්න"
+                    entry = price; sl = nearest_lvn; tp1 = entry; tp2 = entry; risk = 0; swing = 0
+                plan_text = f"{direction}\nSide: {side_text}\nEntry: {entry:.{dec}f}\n🛑 Stop Loss: {sl:.{dec}f}\n🎯 Take Profit 1: {tp1:.{dec}f}\n🎯 Take Profit 2: {tp2:.{dec}f}\nRisk: {risk:.{dec}f} | RR: 1:2\nBuy: {buy_score}/5 | Sell: {sell_score}/5\nBase LVN: {nearest_lvn:.{dec}f}"
+                print(f"{symbol} Price:{price:.{dec}f} Dir:{direction} Buy:{buy_score} Sell:{sell_score}", flush=True)
+                pending_break = state[symbol]["pending"]
+                if pending_break is None:
+                    found = False
+                    for lvl in lvn_list:
+                        if closes[-2] < lvl < price:
+                            state[symbol]["pending"] = {"level": lvl, "dir": "UP", "candles": 0}; found=True
+                            sl_b, tp_b, tp2_b, _, _ = calc_trade(price, "BUY", klines, lvl)
+                            send_telegram(f"👀 BREAK UP - {symbol}.P - LVN {lvl:.{dec}f}\nPrice: {price:.{dec}f}\n\n🟢 BUY SETUP (Retest enakan inna)\nSide: BUY / LONG\nEntry: {price:.{dec}f}\n🛑 Stop Loss: {sl_b:.{dec}f}\n🎯 Take Profit 1: {tp_b:.{dec}f}\n🎯 Take Profit 2: {tp2_b:.{dec}f}\n\nVWAP: {vwap:.{dec}f}")
+                            break
+                        elif closes[-2] > lvl > price:
+                            state[symbol]["pending"] = {"level": lvl, "dir": "DOWN", "candles": 0}; found=True
+                            sl_b, tp_b, tp2_b, _, _ = calc_trade(price, "SELL", klines, lvl)
+                            send_telegram(f"🔴 BREAK DOWN - {symbol}.P - LVN {lvl:.{dec}f}\nPrice: {price:.{dec}f}\n\n🔴 SELL SETUP (Retest enakan inna)\nSide: SELL / SHORT\nEntry: {price:.{dec}f}\n🛑 Stop Loss: {sl_b:.{dec}f}\n🎯 Take Profit 1: {tp_b:.{dec}f}\n🎯 Take Profit 2: {tp2_b:.{dec}f}\n\nVWAP: {vwap:.{dec}f}")
+                            break
+                    if not found:
+                        send_telegram(f"📊 SCAN 5M - V17 PERP - {symbol}.P\nPrice: {price:.{dec}f}\nPOC: {poc:.{dec}f} | Nearest LVN: {nearest_lvn:.{dec}f}\nVWAP: {vwap:.{dec}f} | V2U: {v2u:.{dec}f} V2D: {v2d:.{dec}f}\nPA: {pa_name} | Delta: {delta_pct:.1f}% | CVD: {'UP 🟢' if cvd_rising else 'DOWN 🔴'}\nAbsorption: Bull {bull_abs} Bear {bear_abs}\n\n--- TRADE DECISION ---\n{plan_text}\n\n{action}")
+                    continue
+                pending_break["candles"] += 1
+                if pending_break["candles"] > 10:
+                    send_telegram(f"❌ Break Cancel - {symbol}.P - Retest awe na\nLevel: {pending_break['level']:.{dec}f}")
+                    state[symbol]["pending"] = None; continue
+                lvl = pending_break["level"]
+                is_retest = abs(price - lvl) / lvl < 0.003
+                if not is_retest:
+                    send_telegram(f"⏳ Waiting Retest... - {symbol}.P\nLevel: {lvl:.{dec}f} | Price: {price:.{dec}f} | Gap: {abs(price-lvl):.{dec}f}\nPA: {pa_name} | CVD: {'UP' if cvd_rising else 'DOWN'}\n\n{plan_text}")
+                    continue
+                if pending_break["dir"]=="UP":
+                    score=0; reasons=[]
+                    if price > lvl: score+=1; reasons.append("✅ Retest Hold")
+                    if bull_pa: score+=1; reasons.append(f"✅ PA: {pa_name}")
+                    if bull_abs: score+=1; reasons.append("✅ Bull Absorption 🔥")
+                    if cvd_rising and delta_pct > 0.5: score+=1; reasons.append(f"✅ CVD UP Delta +{delta_pct:.1f}%")
+                    if price > vwap: score+=1; reasons.append("✅ VWAP OK")
+                    if ema9 > ema21: score+=1; reasons.append("✅ EMA UP")
+                    if score >= 4:
+                        sl_c, tp_c, tp2_c, _, _ = calc_trade(price, "BUY", klines, lvl)
+                        send_telegram(f"🟢 BUY SIGNAL - {symbol}.P - CONFIRMED - SCORE {score}/6\n\nPair: {symbol}.P 5M - PERP\nSide: BUY / LONG\nEntry: {price:.{dec}f}\n🛑 Stop Loss: {sl_c:.{dec}f}\n🎯 Take Profit 1: {tp_c:.{dec}f}\n🎯 Take Profit 2: {tp2_c:.{dec}f}\nRR: 1:2\n\n" + "\n".join(reasons) + f"\nPOC: {poc:.{dec}f} | VWAP: {vwap:.{dec}f}\n\n👉 Dan BUY Trade eka ganna!")
+                        state[symbol]["pending"]=None
+                    else:
+                        send_telegram(f"⚠️ Retest awa, eth Score madi: {score}/6 - {symbol}.P\nLevel: {lvl:.{dec}f} Price: {price:.{dec}f}\n" + "\n".join(reasons) + f"\n\n{plan_text}")
+                elif pending_break["dir"]=="DOWN":
+                    score=0; reasons=[]
+                    if price < lvl: score+=1; reasons.append("✅ Retest Reject")
+                    if bear_pa: score+=1; reasons.append(f"✅ PA: {pa_name}")
+                    if bear_abs: score+=1; reasons.append("✅ Bear Absorption 🔥")
+                    if not cvd_rising and delta_pct < -0.5: score+=1; reasons.append(f"✅ CVD DOWN Delta {delta_pct:.1f}%")
+                    if price < vwap: score+=1; reasons.append("✅ VWAP OK")
+                    if ema9 < ema21: score+=1; reasons.append("✅ EMA DOWN")
+                    if score >= 4:
+                        sl_c, tp_c, tp2_c, _, _ = calc_trade(price, "SELL", klines, lvl)
+                        send_telegram(f"🔴 SELL SIGNAL - {symbol}.P - CONFIRMED - SCORE {score}/6\n\nPair: {symbol}.P 5M - PERP\nSide: SELL / SHORT\nEntry: {price:.{dec}f}\n🛑 Stop Loss: {sl_c:.{dec}f}\n🎯 Take Profit 1: {tp_c:.{dec}f}\n🎯 Take Profit 2: {tp2_c:.{dec}f}\nRR: 1:2\n\n" + "\n".join(reasons) + f"\nPOC: {poc:.{dec}f} | VWAP: {vwap:.{dec}f}\n\n👉 Dan SELL Trade eka ganna!")
+                        state[symbol]["pending"]=None
+                    else:
+                        send_telegram(f"⚠️ Retest awa, eth Score madi: {score}/6 - {symbol}.P\nLevel: {lvl:.{dec}f} Price: {price:.{dec}f}\n" + "\n".join(reasons) + f"\n\n{plan_text}")
+            except Exception as e:
+                print(f"Error {symbol}: {e}", flush=True)
+                continue
+        time.sleep(20)
     except Exception as e:
         print("ERROR:", traceback.format_exc(), flush=True)
         send_telegram(f"❌ ERROR\n{str(e)[:300]}")
