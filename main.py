@@ -17,8 +17,7 @@ def keep_alive():
         print("KeepAlive Error:", e, flush=True)
 threading.Thread(target=keep_alive, daemon=True).start()
 
-# ===== Binance එකෙන් Data ගන්න තැන 3ක් - එකක් Fail උනොත් අනිත් එක =====
-BASES = ["https://fapi.binance.com", "https://fapi.binance.vision", "https://fapi.binance.us"]
+# ===== BYBIT PERP - Binance Block eka nathi karanna =====
 SYMBOLS = ["ONTUSDT", "DOTUSDT", "PUMPUSDT"]
 
 def send_telegram(msg):
@@ -29,34 +28,40 @@ def send_telegram(msg):
     except Exception as e:
         print("TG Error:", e, flush=True)
 
-def safe_json(r):
-    txt = r.text
-    if txt.strip().startswith("<"): return None
-    try: return json.loads(txt)
-    except: return None
-
 def get_klines(symbol, limit=100):
-    for BASE in BASES:
-        try:
-            r = requests.get(f"{BASE}/fapi/v1/klines?symbol={symbol}&interval=5m&limit={limit}", timeout=10)
-            data = safe_json(r)
-            if data is not None and isinstance(data, list) and len(data) > 10:
-                print(f"KLINES OK from {BASE} for {symbol}", flush=True)
-                return data
-        except Exception as e:
-            print(f"Klines fail {BASE} {e}", flush=True)
-            continue
-    return None
+    # Bybit: list eka aluthen parana ta enawa, api parana idan aluthata hadanawa
+    try:
+        r = requests.get(f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=5&limit={limit}", timeout=15)
+        j = r.json()
+        lst = j.get("result", {}).get("list", [])
+        if not lst or len(lst) < 10: return None
+        lst = lst[::-1] # parana -> aluth
+        # Binance format ekata convert karanawa: [time, open, high, low, close, volume]
+        klines = []
+        for x in lst:
+            klines.append([int(x[0]), x[1], x[2], x[3], x[4], x[5]])
+        print(f"KLINES OK Bybit {symbol} len {len(klines)}", flush=True)
+        return klines
+    except Exception as e:
+        print(f"Klines fail Bybit {symbol} {e}", flush=True)
+        return None
 
 def get_agg_trades(symbol, limit=1000):
-    for BASE in BASES:
-        try:
-            r = requests.get(f"{BASE}/fapi/v1/aggTrades?symbol={symbol}&limit={limit}", timeout=10)
-            data = safe_json(r)
-            if data is not None and isinstance(data, list) and len(data) > 10:
-                return data
-        except: continue
-    return None
+    # Bybit Public Trades - Buy/Sell flow eka ganna
+    try:
+        r = requests.get(f"https://api.bybit.com/v5/market/recent-trade?category=linear&symbol={symbol}&limit=1000", timeout=15)
+        j = r.json()
+        lst = j.get("result", {}).get("list", [])
+        if not lst: return None
+        # Binance format ekata: q = size, m = True nam Sell, p = price
+        trades = []
+        for x in lst[::-1]:
+            # Bybit side: Buy = buyer active, Sell = seller active
+            trades.append({"q": x["size"], "m": True if x["side"] == "Sell" else False, "p": x["price"]})
+        return trades
+    except Exception as e:
+        print(f"Trades fail {e}", flush=True)
+        return None
 
 def ema(data, period):
     k = 2/(period+1); e = data[0]
@@ -144,10 +149,8 @@ def calc_trade(price, direction, klines, nearest_lvn):
         risk = sl - price
         return sl, price - risk*2, price - risk*3, risk, swing_high
 
-print(f"BOT STARTED - V19 PERP - ID:{INSTANCE_ID}", flush=True)
-send_telegram(f"🔥 BOT ON - V19 PERP - ID:{INSTANCE_ID}\nCoin 3i:\n1. ONTUSDT.P\n2. DOTUSDT.P\n3. PUMPUSDT.P\n\nData Test karanawa...")
-
-state = {s: {"pending": None} for s in SYMBOLS}
+print(f"BOT STARTED - V20 BYBIT PERP - ID:{INSTANCE_ID}", flush=True)
+send_telegram(f"🔥 BOT ON - V20 BYBIT PERP - ID:{INSTANCE_ID}\nCoin 3i:\n1. ONTUSDT.P\n2. DOTUSDT.P\n3. PUMPUSDT.P\n\nDan Bybit Perp Data walin - Binance Block na!")
 
 while True:
     try:
@@ -156,7 +159,7 @@ while True:
                 print(f"Checking {symbol}...", flush=True)
                 klines = get_klines(symbol, 100)
                 if klines is None:
-                    send_telegram(f"❌ DATA FAIL - {symbol}.P\nBinance eken Data enne na. Railway IP Block wela.\nID:{INSTANCE_ID}")
+                    send_telegram(f"❌ DATA FAIL - {symbol}.P\nBybit ekenuth Data enne na.\nID:{INSTANCE_ID}")
                     continue
                 closes = [float(k[4]) for k in klines]
                 price = closes[-1]
@@ -198,11 +201,9 @@ while True:
                     entry = price; sl = nearest_lvn; tp1 = entry; tp2 = entry; risk = 0; swing = 0
                 plan_text = f"{direction}\nSide: {side_text}\nEntry: {entry:.{dec}f}\n🛑 Stop Loss: {sl:.{dec}f}\n🎯 Take Profit 1: {tp1:.{dec}f}\n🎯 Take Profit 2: {tp2:.{dec}f}\nRisk: {risk:.{dec}f} | RR: 1:2\nBuy: {buy_score}/5 | Sell: {sell_score}/5\nBase LVN: {nearest_lvn:.{dec}f}"
                 print(f"{symbol} Price:{price:.{dec}f} Dir:{direction} Buy:{buy_score} Sell:{sell_score}", flush=True)
-                # ===== V19 - හැම පාරම SCAN යවනවා, Candle එකක් එනකන් ඉන්නෙ නෑ =====
-                send_telegram(f"📊 SCAN 5M - V19 PERP - {symbol}.P\nPrice: {price:.{dec}f}\nPOC: {poc:.{dec}f} | Nearest LVN: {nearest_lvn:.{dec}f}\nVWAP: {vwap:.{dec}f} | V2U: {v2u:.{dec}f} V2D: {v2d:.{dec}f}\nPA: {pa_name} | Delta: {delta_pct:.1f}% | CVD: {'UP 🟢' if cvd_rising else 'DOWN 🔴'}\nAbsorption: Bull {bull_abs} Bear {bear_abs}\n\n--- TRADE DECISION ---\n{plan_text}\n\n{action}")
+                send_telegram(f"📊 SCAN 5M - V20 BYBIT PERP - {symbol}.P\nPrice: {price:.{dec}f}\nPOC: {poc:.{dec}f} | Nearest LVN: {nearest_lvn:.{dec}f}\nVWAP: {vwap:.{dec}f} | V2U: {v2u:.{dec}f} V2D: {v2d:.{dec}f}\nPA: {pa_name} | Delta: {delta_pct:.1f}% | CVD: {'UP 🟢' if cvd_rising else 'DOWN 🔴'}\nAbsorption: Bull {bull_abs} Bear {bear_abs}\n\n--- TRADE DECISION ---\n{plan_text}\n\n{action}")
             except Exception as e:
                 print(f"Error {symbol}: {e}", flush=True)
-                send_telegram(f"❌ ERROR {symbol}\n{str(e)[:200]}")
                 continue
         print("Sleep 5 min...", flush=True)
         time.sleep(300)
