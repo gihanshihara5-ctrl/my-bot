@@ -1,12 +1,26 @@
-import time, requests, math, traceback, json
-import uuid
-INSTANCE_ID = str(uuid.uuid4())[:6]
+import time, requests, math, traceback, json, os, uuid, threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
+INSTANCE_ID = str(uuid.uuid4())[:6]
 TELEGRAM_TOKEN = '9267375532:AAFe8pS5bvsRrDAA8_4soTzetvD1uN6HJ0g'
 TELEGRAM_CHAT_ID = '8633386457'
-# ===== BINANCE PERPETUAL (FUTURES) DATA =====
+
+# ===== Railway එක Restart නොකර තියාගන්න Keep-Alive එක =====
+# Railway එක Port එකක් බලාපොරොත්තු වෙනවා. මේක නැත්නම් Railway එක Bot එකව මරලා ආයෙ Start කරනවා
+def keep_alive():
+    try:
+        port = int(os.environ.get("PORT", 8080))
+        class H(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
+            def log_message(self, *a): pass
+        HTTPServer(("0.0.0.0", port), H).serve_forever()
+    except Exception as e:
+        print("KeepAlive Error:", e, flush=True)
+
+threading.Thread(target=keep_alive, daemon=True).start()
+
 BASE = "https://fapi.binance.vision"
-# ===== COIN 3 විතරයි =====
 SYMBOLS = ["ONTUSDT", "DOTUSDT", "PUMPUSDT"]
 
 def send_telegram(msg):
@@ -116,20 +130,16 @@ def calc_trade(price, direction, klines, nearest_lvn):
         if price - sl > max_risk: sl = price - max_risk
         if price - sl < min_risk: sl = price - min_risk
         risk = price - sl
-        tp1 = price + risk*2
-        tp2 = price + risk*3
-        return sl, tp1, tp2, risk, swing_low
+        return sl, price + risk*2, price + risk*3, risk, swing_low
     else:
         sl = min(swing_high + max_risk*0.1, nearest_lvn + max_risk*0.1)
         if sl - price > max_risk: sl = price + max_risk
         if sl - price < min_risk: sl = price + min_risk
         risk = sl - price
-        tp1 = price - risk*2
-        tp2 = price - risk*3
-        return sl, tp1, tp2, risk, swing_high
+        return sl, price - risk*2, price - risk*3, risk, swing_high
 
-print("BOT STARTED - V17 PERP 3 COINS", flush=True)
-send_telegram("🔥 BOT ON - V17 PERP\nBinance Perpetual Only\nCoin 3i witharai:\n1. ONTUSDT.P\n2. DOTUSDT.P\n3. PUMPUSDT.P\n\nDan Perp Data walin analyse karanawa.")
+print(f"BOT STARTED - V18 PERP 3 COINS - ID:{INSTANCE_ID}", flush=True)
+send_telegram(f"🔥 BOT ON - V18 PERP - ID:{INSTANCE_ID}\nBinance Perpetual Only\nCoin 3i witharai:\n1. ONTUSDT.P\n2. DOTUSDT.P\n3. PUMPUSDT.P\n\nDan Perp Data walin analyse karanawa.")
 
 state = {s: {"pending": None, "last_candle": 0} for s in SYMBOLS}
 
@@ -197,7 +207,7 @@ while True:
                             send_telegram(f"🔴 BREAK DOWN - {symbol}.P - LVN {lvl:.{dec}f}\nPrice: {price:.{dec}f}\n\n🔴 SELL SETUP (Retest enakan inna)\nSide: SELL / SHORT\nEntry: {price:.{dec}f}\n🛑 Stop Loss: {sl_b:.{dec}f}\n🎯 Take Profit 1: {tp_b:.{dec}f}\n🎯 Take Profit 2: {tp2_b:.{dec}f}\n\nVWAP: {vwap:.{dec}f}")
                             break
                     if not found:
-                        send_telegram(f"📊 SCAN 5M - V17 PERP - {symbol}.P\nPrice: {price:.{dec}f}\nPOC: {poc:.{dec}f} | Nearest LVN: {nearest_lvn:.{dec}f}\nVWAP: {vwap:.{dec}f} | V2U: {v2u:.{dec}f} V2D: {v2d:.{dec}f}\nPA: {pa_name} | Delta: {delta_pct:.1f}% | CVD: {'UP 🟢' if cvd_rising else 'DOWN 🔴'}\nAbsorption: Bull {bull_abs} Bear {bear_abs}\n\n--- TRADE DECISION ---\n{plan_text}\n\n{action}")
+                        send_telegram(f"📊 SCAN 5M - V18 PERP - {symbol}.P\nPrice: {price:.{dec}f}\nPOC: {poc:.{dec}f} | Nearest LVN: {nearest_lvn:.{dec}f}\nVWAP: {vwap:.{dec}f} | V2U: {v2u:.{dec}f} V2D: {v2d:.{dec}f}\nPA: {pa_name} | Delta: {delta_pct:.1f}% | CVD: {'UP 🟢' if cvd_rising else 'DOWN 🔴'}\nAbsorption: Bull {bull_abs} Bear {bear_abs}\n\n--- TRADE DECISION ---\n{plan_text}\n\n{action}")
                     continue
                 pending_break["candles"] += 1
                 if pending_break["candles"] > 10:
