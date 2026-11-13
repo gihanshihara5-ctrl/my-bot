@@ -2,7 +2,7 @@ import time
 import requests
 
 TELEGRAM_TOKEN = '9267375532:AAH1J6hZGJhlJN6cZiHn8ur-rRUHi7HE-LA'
-TELEGRAM_CHAT_ID = '270071979'
+TELEGRAM_CHAT_ID = '8633386457'
 
 
 def send_telegram(msg):
