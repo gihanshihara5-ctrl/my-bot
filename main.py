@@ -1,4 +1,6 @@
 import time, requests, math, traceback, json
+import uuid
+INSTANCE_ID = str(uuid.uuid4())[:6]
 
 TELEGRAM_TOKEN = '9267375532:AAFe8pS5bvsRrDAA8_4soTzetvD1uN6HJ0g'
 TELEGRAM_CHAT_ID = '8633386457'
