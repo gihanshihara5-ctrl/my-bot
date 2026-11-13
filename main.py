@@ -1,6 +1,6 @@
 import time, requests, math, traceback, json
 
-TELEGRAM_TOKEN = '9267375532:AAH1J6hZGJhlJN6cZiHn8ur-rRUHi7HE-LA'
+TELEGRAM_TOKEN = '9267375532:AAFe8pS5bvsRrDAA8_4soTzetvD1uN6HJ0g'
 TELEGRAM_CHAT_ID = '8633386457'
 import uuid
 INSTANCE_ID = str(uuid.uuid4())[:6]
