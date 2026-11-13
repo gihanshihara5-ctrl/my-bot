@@ -1,12 +1,9 @@
 import time, requests, math, traceback
 
-# ========= CONFIG =========
 TELEGRAM_TOKEN = '9267375532:AAH1J6hZGJhlJN6cZiHn8ur-rRUHi7HE-LA'
 TELEGRAM_CHAT_ID = '8633386457'
-# Real Binance - Testnet නෙවෙයි, API Key ඕන නෑ, Signal විතරයි
-BASE = "https://fapi.binance.com"
+BASE = "https://fapi.binance.com"  # Real Binance, Testnet නෙවෙයි
 SYMBOL = "BTCUSDT"
-# ==========================
 
 def send_telegram(msg):
     try:
@@ -17,16 +14,12 @@ def send_telegram(msg):
         print("TG Error:", e, flush=True)
 
 def get_klines(limit=100):
-    # Error එකක් ආවොත් Dict එකක් එනවා, ඒක Check කරනවා
     try:
         r = requests.get(f"{BASE}/fapi/v1/klines?symbol={SYMBOL}&interval=5m&limit={limit}", timeout=10)
         data = r.json()
+        print(f"Klines type: {type(data)} len: {len(data) if isinstance(data, list) else data}", flush=True)
         if isinstance(data, dict):
-            print("Binance Error Dict:", data, flush=True)
-            send_telegram(f"❌ Binance Error\n{data.get('msg','Unknown')}\nCode: {data.get('code')}")
-            return None
-        if not isinstance(data, list) or len(data)==0:
-            print("Empty klines", flush=True)
+            print("Binance returned Dict Error:", data, flush=True)
             return None
         return data
     except Exception as e:
@@ -38,7 +31,7 @@ def get_agg_trades(limit=1500):
         r = requests.get(f"{BASE}/fapi/v1/aggTrades?symbol={SYMBOL}&limit={limit}", timeout=10)
         data = r.json()
         if isinstance(data, dict):
-            print("AggTrades Error Dict:", data, flush=True)
+            print("AggTrades Dict Error:", data, flush=True)
             return None
         return data
     except Exception as e:
@@ -104,8 +97,8 @@ def get_orderflow(trades):
     bear_abs = (r_delta > 0.5) and (abs(price_change_pct) < 0.08) and (price_end <= price_start)
     return delta_pct, cvd_rising, cvd_slope, bull_abs, bear_abs
 
-print("BOT STARTED - REAL BINANCE, TELEGRAM ONLY", flush=True)
-send_telegram("🔥 BOT ON - FIXED\nError eka fix kala.\nReal Binance Data (Testnet newei)\nAPI Key ne. Signal witharai.\n\n1. FRVP LVN\n2. Break + Retest\n3. Price Action\n4. Delta Absorption\n5. CVD\n6. VWAP Bands 1-2-3")
+print("BOT STARTED - V9 REAL BINANCE FIXED", flush=True)
+send_telegram("🔥 BOT ON - V9 FIXED\nMeka aluth code eka. Testnet newei, Real Binance.\nError eka fix kala.\n\n1. FRVP LVN\n2. Break + Retest\n3. Price Action\n4. Delta Absorption\n5. CVD\n6. VWAP Bands")
 
 last_candle = 0
 pending_break = None
@@ -114,27 +107,22 @@ while True:
     try:
         klines = get_klines(100)
         if klines is None:
-            print("Klines None, retry in 20s", flush=True)
+            print("Klines None, retry 20s", flush=True)
             time.sleep(20); continue
-
         closes = [float(k[4]) for k in klines]
         price = closes[-1]; candle_time = klines[-1][0]
         if candle_time == last_candle:
             time.sleep(20); continue
         last_candle = candle_time
-
         poc, lvn_list = get_volume_profile(klines)
         vwap, v1u, v1d, v2u, v2d, v3u, v3d = get_vwap_bands(klines)
         bull_pa, bear_pa, pa_name = get_price_action(klines)
         trades = get_agg_trades(1500)
         if trades is None:
-            print("Trades None, retry", flush=True)
             time.sleep(20); continue
         delta_pct, cvd_rising, cvd_slope, bull_abs, bear_abs = get_orderflow(trades)
         ema9 = ema(closes,9); ema21 = ema(closes,21)
-
         print(f"Price:{price:.0f} POC:{poc:.0f} LVN:{[f'{x:.0f}' for x in lvn_list]} VWAP:{vwap:.0f} PA:{pa_name} Delta:{delta_pct:.1f} CVD:{cvd_rising} BullAbs:{bull_abs} BearAbs:{bear_abs} Pending:{pending_break}", flush=True)
-
         if pending_break is None:
             found = False
             for lvl in lvn_list:
@@ -145,9 +133,8 @@ while True:
                     pending_break = {"level": lvl, "dir": "DOWN", "candles": 0}; found=True
                     send_telegram(f"👀 BREAK DOWN - LVN {lvl:.0f}\nPrice: {price:.0f}\nVWAP: {vwap:.0f}\nRetest enakan inna...")
             if not found:
-                send_telegram(f"📊 SCAN 5M\nPrice: {price:.0f}\nPOC: {poc:.0f} | Nearest LVN: {min(lvn_list, key=lambda x: abs(x-price)):.0f}\nVWAP: {vwap:.0f} | V2U: {v2u:.0f} V2D: {v2d:.0f}\nPA: {pa_name} | Delta: {delta_pct:.1f}% | CVD: {'UP 🟢' if cvd_rising else 'DOWN 🔴'}\nAbsorption: Bull {bull_abs} Bear {bear_abs}\n⏳ LVN Break ekak na. Break ekak enakan wait.")
+                send_telegram(f"📊 SCAN 5M\nPrice: {price:.0f}\nPOC: {poc:.0f} | Nearest LVN: {min(lvn_list, key=lambda x: abs(x-price)):.0f}\nVWAP: {vwap:.0f} | V2U: {v2u:.0f} V2D: {v2d:.0f}\nPA: {pa_name} | Delta: {delta_pct:.1f}% | CVD: {'UP 🟢' if cvd_rising else 'DOWN 🔴'}\nAbsorption: Bull {bull_abs} Bear {bear_abs}\n⏳ LVN Break ekak na.")
             time.sleep(10); continue
-
         pending_break["candles"] += 1
         if pending_break["candles"] > 10:
             send_telegram(f"❌ Break Cancel - Retest awe na\nLevel: {pending_break['level']:.0f}")
@@ -157,7 +144,6 @@ while True:
         if not is_retest:
             send_telegram(f"⏳ Waiting Retest...\nLevel: {lvl:.0f} | Price: {price:.0f} | Gap: {abs(price-lvl):.0f}\nPA: {pa_name} | CVD: {'UP' if cvd_rising else 'DOWN'}")
             time.sleep(10); continue
-
         if pending_break["dir"]=="UP":
             score=0; reasons=[]
             if price > lvl: score+=1; reasons.append("✅ Retest Hold")
@@ -168,10 +154,10 @@ while True:
             if ema9 > ema21: score+=1; reasons.append("✅ EMA UP")
             if score >= 4:
                 sl = lvl - 80; tp = price + (price - sl)*2.5; tp2 = price + (price - sl)*4
-                send_telegram(f"🟢 LONG SIGNAL - SCORE {score}/6\n\nPair: BTCUSDT 5M\nEntry: {price:.1f}\n🎯 TP1: {tp:.1f}\n🎯 TP2: {tp2:.1f}\n🛑 SL: {sl:.1f}\nRR: 1:2.5\n\n" + "\n".join(reasons) + f"\nPOC: {poc:.0f} | VWAP: {vwap:.0f}\n\n👉 Oya athin Trade eka ganna.")
+                send_telegram(f"🟢 LONG SIGNAL - SCORE {score}/6\n\nPair: BTCUSDT 5M\nEntry: {price:.1f}\n🎯 TP1: {tp:.1f}\n🎯 TP2: {tp2:.1f}\n🛑 SL: {sl:.1f}\nRR: 1:2.5\n\n" + "\n".join(reasons) + f"\nPOC: {poc:.0f} | VWAP: {vwap:.0f}")
                 pending_break=None
             else:
-                send_telegram(f"⚠️ Retest awa, eth Score madi: {score}/6\nLevel: {lvl:.0f} Price: {price:.0f}\n" + "\n".join(reasons) + "\nTrade gatte na. 4k ona.")
+                send_telegram(f"⚠️ Retest awa, eth Score madi: {score}/6\nLevel: {lvl:.0f} Price: {price:.0f}\n" + "\n".join(reasons))
         elif pending_break["dir"]=="DOWN":
             score=0; reasons=[]
             if price < lvl: score+=1; reasons.append("✅ Retest Reject")
@@ -182,10 +168,10 @@ while True:
             if ema9 < ema21: score+=1; reasons.append("✅ EMA DOWN")
             if score >= 4:
                 sl = lvl + 80; tp = price - (sl - price)*2.5; tp2 = price - (sl - price)*4
-                send_telegram(f"🔴 SHORT SIGNAL - SCORE {score}/6\n\nPair: BTCUSDT 5M\nEntry: {price:.1f}\n🎯 TP1: {tp:.1f}\n🎯 TP2: {tp2:.1f}\n🛑 SL: {sl:.1f}\nRR: 1:2.5\n\n" + "\n".join(reasons) + f"\nPOC: {poc:.0f} | VWAP: {vwap:.0f}\n\n👉 Oya athin Trade eka ganna.")
+                send_telegram(f"🔴 SHORT SIGNAL - SCORE {score}/6\n\nPair: BTCUSDT 5M\nEntry: {price:.1f}\n🎯 TP1: {tp:.1f}\n🎯 TP2: {tp2:.1f}\n🛑 SL: {sl:.1f}\nRR: 1:2.5\n\n" + "\n".join(reasons) + f"\nPOC: {poc:.0f} | VWAP: {vwap:.0f}")
                 pending_break=None
             else:
-                send_telegram(f"⚠️ Retest awa, eth Score madi: {score}/6\nLevel: {lvl:.0f} Price: {price:.0f}\n" + "\n".join(reasons) + "\nTrade gatte na. 4k ona.")
+                send_telegram(f"⚠️ Retest awa, eth Score madi: {score}/6\nLevel: {lvl:.0f} Price: {price:.0f}\n" + "\n".join(reasons))
         time.sleep(10)
     except Exception as e:
         print("ERROR:", traceback.format_exc(), flush=True)
