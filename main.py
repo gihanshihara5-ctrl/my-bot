@@ -1,20 +1,18 @@
-# V21 FINAL - NO PANDAS VERSION - Replit / PC - Telegram Signal
-# pandas, numpy one na - requests witharai
+# V21 - Railway Version - NO PANDAS
 import requests
 import time
+import os
 from datetime import datetime
 
-# ===== MEWA WENAS KARANNA =====
-COIN = "BTCUSDT"
+# Railway eke Variables walin gannawa - Code eke token danna one na
+COIN = os.getenv("COIN", "BTCUSDT")
 TIMEFRAME = "5m"
 OBI_THRESHOLD = 0.70
-
-TELEGRAM_TOKEN = "9267375532:AAFe8pS5bvsRrDAA8_4soTzetvD1uN6HJ0g"
-TELEGRAM_CHAT_ID = "8633386457"
-# ==============================
+TELEGRAM_TOKEN = os.getenv("9267375532:AAFe8pS5bvsRrDAA8_4soTzetvD1uN6HJ0g", "")
+TELEGRAM_CHAT_ID = os.getenv("8633386457", "")
 
 def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 def send_telegram(msg):
     try:
@@ -28,20 +26,12 @@ def send_telegram(msg):
 def get_data():
     url = f"https://api.binance.com/api/v3/klines?symbol={COIN}&interval={TIMEFRAME}&limit=200"
     r = requests.get(url).json()
-    # r = [time, open, high, low, close, volume, ...]
     candles = []
     for c in r:
-        candles.append({
-            'open': float(c[1]),
-            'high': float(c[2]),
-            'low': float(c[3]),
-            'close': float(c[4]),
-            'volume': float(c[5])
-        })
+        candles.append({'open': float(c[1]), 'high': float(c[2]), 'low': float(c[3]), 'close': float(c[4]), 'volume': float(c[5])})
     return candles
 
 def calc_vwap_bands(candles):
-    # VWAP
     pv_sum = 0
     v_sum = 0
     for c in candles:
@@ -49,7 +39,6 @@ def calc_vwap_bands(candles):
         pv_sum += typical * c['volume']
         v_sum += c['volume']
     vwap = pv_sum / v_sum if v_sum != 0 else candles[-1]['close']
-    # Std - last 50 candle walin
     last50 = [c['close'] for c in candles[-50:]]
     mean = sum(last50) / len(last50)
     std = (sum([(x-mean)**2 for x in last50]) / len(last50)) ** 0.5
@@ -58,7 +47,6 @@ def calc_vwap_bands(candles):
 def get_lvn(candles):
     low = min([c['low'] for c in candles])
     high = max([c['high'] for c in candles])
-    # 50 bins
     bins = [low + (high-low)*i/50 for i in range(51)]
     volumes = [0]*50
     for c in candles:
@@ -73,10 +61,7 @@ def get_cvd(candles):
     cvd = []
     cum = 0
     for c in candles:
-        if c['close'] > c['open']:
-            cum += c['volume']
-        else:
-            cum -= c['volume']
+        cum += c['volume'] if c['close'] > c['open'] else -c['volume']
         cvd.append(cum)
     last10_low = min([c['low'] for c in candles[-10:]])
     prev10_low = min([c['low'] for c in candles[-20:-10]])
@@ -108,8 +93,8 @@ def check_pa(candles):
     return False, ""
 
 def main():
-    log(f"V21 Bot Start - {COIN} - NO PANDAS VERSION")
-    send_telegram(f"✅ *V21 Bot Start*\nCoin: {COIN}\nTimeframe: 5min\nFilter: VWAP + LVN + CVD + PA + OBI 70/30")
+    log(f"V21 Bot Start - {COIN} - Railway")
+    send_telegram(f"✅ *V21 Bot Start - Railway*\nCoin: {COIN}\nTimeframe: 5min\nFilter: VWAP + LVN + CVD + PA + OBI 70/30")
     while True:
         try:
             candles = get_data()
@@ -117,9 +102,8 @@ def main():
             lvn = get_lvn(candles)
             price = candles[-1]['close']
             log(f"Price: {price:.2f} | VWAP: {vwap:.2f} | LVN: {lvn:.2f}")
-
             if abs(price - lvn) / lvn < 0.001:
-                log("LVN Retest Awa! Checking...")
+                log("LVN Retest Awa!")
                 has_div, div_type = get_cvd(candles)
                 if not has_div:
                     time.sleep(30)
@@ -134,7 +118,6 @@ def main():
                 if not obi_ok:
                     time.sleep(30)
                     continue
-
                 if pa_type == "BUY":
                     sl = lvn * 0.999
                     tp = u2 if price < u1 else u3 if price < u2 else vwap
@@ -143,20 +126,9 @@ def main():
                     sl = lvn * 1.001
                     tp = l2 if price > l1 else l3 if price > l2 else vwap
                     emoji = "🔴"
-
-                msg = f"""{emoji} *V21 SIGNAL - {pa_type}*
-Coin: {COIN}
-Entry: `{price:.2f}`
-TP: `{tp:.2f}`
-SL: `{sl:.2f}` (LVN)
-
-CVD: {div_type} ✅
-PA: Wick + 2 Candle ✅
-OBI: Bid {bid_r*100:.0f}% / Ask {ask_r*100:.0f}% ✅
-
-Binance eke manual gahanna!"""
+                msg = f"""{emoji} *V21 SIGNAL - {pa_type}*\nCoin: {COIN}\nEntry: `{price:.2f}`\nTP: `{tp:.2f}`\nSL: `{sl:.2f}` (LVN)\n\nCVD: {div_type} ✅\nPA: Wick + 2 Candle ✅\nOBI: Bid {bid_r*100:.0f}% / Ask {ask_r*100:.0f}% ✅\n\nBinance eke manual gahanna!"""
                 send_telegram(msg)
-                print(msg)
+                print(msg, flush=True)
                 time.sleep(300)
             time.sleep(30)
         except Exception as e:
